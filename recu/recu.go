@@ -90,6 +90,7 @@ func Parse(siteUrl string, header map[string]string, jsonLoc int) (playList play
 	playlistData, err := downloadLoop(playlistUrl, 10, tools.FormatedHeader(header, "", 0))
 	if err != nil {
 		errorType = "panic"
+		return
 	}
 	playlistRef := string(playlistData)
 	playlistLines := strings.Split(playlistRef, "\n")

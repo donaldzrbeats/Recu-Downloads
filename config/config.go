@@ -7,6 +7,7 @@ import (
 	"recurbate/playlist"
 	"recurbate/recu"
 	"recurbate/tools"
+	"strings"
 	"sync"
 )
 
@@ -26,7 +27,7 @@ func (config Config) GetPlaylist(urlAny any, jsonLoc int) (playList playlist.Pla
 	defer func() {
 		r := recover()
 		if r != nil {
-			fmt.Fprintf(os.Stderr, "urls are in wrong format, error: %v\n", r)
+			fmt.Fprintf(os.Stderr, "GetPlaylist: urls are in wrong format, error: %v\n", r)
 		}
 	}()
 	var url string
@@ -61,7 +62,7 @@ func (config *Config) GetVideo(playList playlist.Playlist) (fail int) {
 	defer func() {
 		r := recover()
 		if r != nil {
-			fmt.Fprintf(os.Stderr, "urls are in wrong format, error: %v\n", r)
+			fmt.Fprintf(os.Stderr, "GetVideo: urls are in wrong format, error: %v\n", r)
 			fail = 1
 		}
 	}()
@@ -173,30 +174,29 @@ func (config *Config) Empty() bool {
 }
 
 // Parse Urls from HTML
-//func (config Config) ParseHtml(url string) (err error) {
-//	fmt.Println("Downloading HTML")
-//	resp, code, err := request(url, 10, formatedHeader(config.Header, "", 1), nil, "GET")
-//	if code != 200 || err != nil {
-//		if err == nil {
-//			err = fmt.Errorf("response: %s, status code: %d, cloudflare blocked", ANSIColor(string(resp), 2), code)
-//		}
-//		return
-//	}
-//	fmt.Println("Searching for Links")
-//	urlSplit := strings.Split(url, "/")
-//	name := urlSplit[4]
-//	prefix := strings.Join(urlSplit[:3], "/") + fmt.Sprintf("/%s/video/", name)
-//	suffix := "/play"
-//	var urls []any
-//	lines := strings.Split(string(resp), "\n")
-//	for _, v := range lines {
-//		code, err := searchString(v, fmt.Sprintf(`href="/%s/video/`, name), `/play"`)
-//		if err != nil {
-//			continue
-//		}
-//		urls = append(urls, prefix+code+suffix)
-//	}
-//	config.Urls = urls
-//	err = SaveJson(config)
-//	return
-//}
+func (config Config) ParseHtml(url string) (err error) {
+	fmt.Println("Downloading HTML")
+	resp, code, err := tools.Request(url, 10, tools.FormatedHeader(config.Header, "", 1), nil, "GET")
+	if code != 200 || err != nil {
+		if err == nil {
+			err = fmt.Errorf("response: %s, status code: %d, cloudflare blocked", tools.ANSIColor(string(resp), 2), code)
+		}
+		return
+	}
+	fmt.Println("Searching for Links")
+	urlSplit := strings.Split(url, "/")
+	name := urlSplit[4]
+	prefix := strings.Join(urlSplit[:3], "/")
+	urls := config.Urls
+	lines := strings.Split(string(resp), "\n")
+	for _, v := range lines {
+		code, err := tools.SearchString(v, fmt.Sprintf(`href="/%s/video/`, name), `/play"`)
+		if err != nil {
+			continue
+		}
+		urls = append(urls, fmt.Sprintf("%s/%s/video/%s/play", prefix, name, code))
+	}
+	config.Urls = urls
+	err = config.Save()
+	return
+}

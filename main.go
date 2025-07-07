@@ -201,7 +201,9 @@ func main() {
 	}
 	if cfg.Empty() {
 		fmt.Println("please modify config.json")
-		return
+		if tools.Argparser(2) != "parse" {
+			return
+		}
 	}
 	switch tools.Argparser(2) {
 	case "playlist":
@@ -219,13 +221,13 @@ func main() {
 		serialService(cfg)
 	case "hybrid":
 		hybridService(cfg)
-	//case "parse":
-	//	err := config.ParseHtml(tools.Argparser(3))
-	//	if err != nil {
-	//		fmt.Println(err)
-	//	} else {
-	//		fmt.Println("Parsed HTML Successfully")
-	//	}
+	case "parse":
+		err := cfg.ParseHtml(tools.Argparser(3))
+		if err != nil {
+			fmt.Println(err)
+		} else {
+			fmt.Println("Parsed HTML Successfully")
+		}
 	default:
 		parallelService(cfg)
 	}

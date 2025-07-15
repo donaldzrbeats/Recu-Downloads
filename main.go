@@ -29,7 +29,7 @@ func parallelService(cfg config.Config) {
 		wg.Add(1)
 		go func(playList playlist.Playlist) {
 			defer wg.Done()
-			if cfg.GetVideo(playList) == 0 {
+			if cfg.GetVideo(playList) == nil {
 				return
 			}
 			err := os.WriteFile(playList.Filename+".m3u8", playList.M3u8, 0666)
@@ -70,7 +70,7 @@ func hybridService(cfg config.Config) {
 				if playList.IsNil() {
 					continue
 				}
-				if cfg.GetVideo(playList) == 0 {
+				if cfg.GetVideo(playList) == nil {
 					continue
 				}
 				err := os.WriteFile(playList.Filename+".m3u8", playList.M3u8, 0666)
@@ -93,7 +93,7 @@ func serialService(cfg config.Config) {
 			continue
 		}
 		fmt.Printf("%d/%d:\n", i+1, len(playlists))
-		if cfg.GetVideo(playList) == 0 {
+		if cfg.GetVideo(playList) == nil {
 			continue
 		}
 		err := os.WriteFile(playList.Filename+".m3u8", playList.M3u8, 0666)

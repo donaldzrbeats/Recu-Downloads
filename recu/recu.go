@@ -133,20 +133,18 @@ func Parse(siteUrl string, header map[string]string, jsonLoc int) (playList play
 }
 
 // Muxes the transport streams and saves it to a file
-func Mux(playList playlist.Playlist, header map[string]string, restartIndex int, durationPercent []float64) int {
+func Mux(playList playlist.Playlist, header map[string]string, startIndex int, durationPercent []float64) (failIndex int, err error) {
 	var data []byte
-	var err error
 	var file *os.File
 	var avgdur, avgsize tools.AvgBuffer
-	if tools.Abort {
-		return 0
+	if startIndex < 0 {
+		startIndex = 0
 	}
-	restarted := false
-	if restartIndex != 0 {
-		restarted = true
+	if tools.Abort {
+		return startIndex, fmt.Errorf("aborting")
 	}
 	if durationPercent[0] > 100 || durationPercent[1] <= durationPercent[0] {
-		return 0
+		return startIndex, fmt.Errorf("duration format error")
 	}
 	if durationPercent[0] < 0 {
 		durationPercent[0] = 0
@@ -155,10 +153,10 @@ func Mux(playList playlist.Playlist, header map[string]string, restartIndex int,
 		durationPercent[1] = 100
 	}
 	// checks if continuation of previous run
-	if restarted {
+	if startIndex != 0 {
 		file, err = os.OpenFile(playList.Filename+".ts", os.O_APPEND|os.O_WRONLY, 0666)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "oringal file not found, creating new one: %v", err)
+			fmt.Fprintf(os.Stderr, "original file not found, creating new one: %v", err)
 		}
 	}
 	// creates file
@@ -177,38 +175,33 @@ func Mux(playList playlist.Playlist, header map[string]string, restartIndex int,
 		}
 		file, err = os.OpenFile(playList.Filename+".ts", os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0666)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "can not create file: %v", err)
-			return restartIndex
+			return startIndex, fmt.Errorf("can not create file: %v", err)
 		}
 	}
 	defer file.Close()
 	// muxing loop //
-	var startIndex, endIndex int
-	if restarted {
-		startIndex = restartIndex
-	} else {
+	if startIndex == 0  {
 		startIndex = int(float64(playList.Len()) * durationPercent[0] / 100)
 	}
-	endIndex = int(float64(playList.Len()) * durationPercent[1] / 100)
+	endIndex := int(float64(playList.Len()) * durationPercent[1] / 100)
 	for i, tsLink := range playList.List[startIndex:endIndex] {
 		i := i + startIndex
 		if tools.Abort {
-			fmt.Println("\naborting...")
-			return i
+			fmt.Println()
+			return i, fmt.Errorf("aborting")
 		}
 		startTime := time.Now()
 		err := downloadLoop(&data, tsLink, header, 10, 5)
 		if err != nil {
 			fmt.Println()
-			fmt.Fprintf(os.Stderr, "Error: %v\n", tools.ANSIColor(err, 2))
-			fmt.Fprintf(os.Stderr, "Failed at %.2f%%\n", float32(i)/float32(playList.Len())*100)
-			return i
+			err = fmt.Errorf("error: %v\nFailed at %.2f%%", tools.ANSIColor(err, 2), float32(i)/float32(playList.Len())*100)
+			return i, err
 		}
 		endDur := time.Since(startTime).Minutes()
 		_, err = file.Write(data)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "can not write file: %v", err)
-			return i
+			err = fmt.Errorf("can not write file: %v", err)
+			return i, err
 		}
 		// Calculate User Interface Timings
 		avgsize.Add(float64(len(data)))
@@ -219,8 +212,7 @@ func Mux(playList playlist.Playlist, header map[string]string, restartIndex int,
 		percent := float64(i) / float64(playList.Len()) * 100
 		fmt.Printf("\n\033[A\033[2KDownloading: %s\tRemaining: %s\t%s", tools.ANSIColor(fmt.Sprintf("%.1f%%", percent), 33), tools.FormatMinutes(eta), tools.FormatBytesPerSecond(speedSecs))
 	}
-	fmt.Println()
-	return 0
+	return 0, nil
 }
 
 // download retry loop for Mux()

@@ -24,24 +24,12 @@ type Config struct {
 
 // Gets Playlist
 func (config Config) GetPlaylist(urlAny any, jsonLoc int) (playList playlist.Playlist) {
-	defer func() {
-		r := recover()
-		if r != nil {
-			fmt.Fprintf(os.Stderr, "GetPlaylist: urls are in wrong format, error: %v\n", r)
-		}
-	}()
-	var url string
-	switch t := urlAny.(type) {
-	case string:
-		url = t
-	case []any:
-		if len(t) > 0 {
-			url = t[0].(string)
-		} else {
-			panic("no url")
-		}
-	default:
-		panic("url is incorrect type")
+	url, _, _, err, complete := parseUrl(urlAny)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "GetPlaylist: urls are in wrong format, error: %v\n", err)
+	}
+	if complete {
+		return
 	}
 	playList, status, err := recu.Parse(url, config.Header, jsonLoc)
 	switch status {
@@ -58,74 +46,102 @@ func (config Config) GetPlaylist(urlAny any, jsonLoc int) (playList playlist.Pla
 }
 
 // Saves video to working directory
-func (config *Config) GetVideo(playList playlist.Playlist) (fail int) {
+func (config *Config) GetVideo(playList playlist.Playlist) error {
+	url, duration, startIndex, err, _ := parseUrl(config.Urls[playList.JsonLoc])
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return err
+	}
+	// download and mux playlist
+	lastIndex, err := recu.Mux(playList, tools.FormatedHeader(config.Header, "", 0), startIndex, duration)
+	println()
+	if err == nil {
+		modifyUrl(&config.Urls[playList.JsonLoc], "COMPLETE")
+		fmt.Printf("Completed: %v:%v\n", playList.Filename, url)
+	} else {
+		fmt.Fprintln(os.Stderr, err)
+		fmt.Fprintf(os.Stderr, "Download Failed at line: %v\n", lastIndex)
+		modifyUrl(&config.Urls[playList.JsonLoc], lastIndex)
+	}
+	// save state to json
+	err2 := config.Save()
+	if err2 != nil {
+		fmt.Println(err2)
+	}
+	return err
+}
+
+// Modify URL object from json
+func modifyUrl(url *any, lastIndex any) {
+	switch t := (*url).(type) {
+	case string:
+		*url = []any{t, lastIndex}
+	case []any:
+		switch len(t) {
+		case 1:
+			t = append(t, lastIndex)
+			*url = t
+		case 2:
+			t[1] = lastIndex
+			*url = t
+		case 4:
+			t = append(t, lastIndex)
+			*url = t
+		case 5:
+			t[4] = lastIndex
+			*url = t
+		}
+	}
+}
+
+// Parse URL object from json
+func parseUrl(url any) (urlString string, duration []float64, startIndex int, err error, complete bool) {
 	defer func() {
 		r := recover()
 		if r != nil {
-			fmt.Fprintf(os.Stderr, "GetVideo: urls are in wrong format, error: %v\n", r)
-			fail = 1
+			err = fmt.Errorf("GetVideo: urls are in wrong format, error: %v", r)
 		}
 	}()
-	var url string
-	var duration []float64 = nil
-	var num int = 0
-	// parse list of urls in json
-	switch t := config.Urls[playList.JsonLoc].(type) {
+	switch t := url.(type) {
 	case string:
-		url = t
+		urlString = t
 	case []any:
 		switch len(t) {
 		case 1:
-			url = t[0].(string)
+			urlString = t[0].(string)
 		case 2:
-			url = t[0].(string)
-			num = int(t[1].(float64))
+			urlString = t[0].(string)
+			str, ok := t[1].(string)
+			if ok {
+				if str == "COMPLETE" {
+					complete = true
+				}
+			} else {
+				startIndex = int(t[1].(float64))
+			}
 		case 4:
-			url = t[0].(string)
+			urlString = t[0].(string)
 			duration = tools.PercentPrase(t[1:])
 		case 5:
-			url = t[0].(string)
+			urlString = t[0].(string)
 			duration = tools.PercentPrase(t[1:4])
-			num = int(t[4].(float64))
+			str, ok := t[4].(string)
+			if ok {
+				if str == "COMPLETE" {
+					complete = true
+				}
+			} else {
+				startIndex = int(t[4].(float64))
+			}
+
 		default:
-			panic("incorrect length of url array")
+			err = fmt.Errorf("incorrect length of url array")
 		}
 	default:
-		panic("url is incorrect type")
+		err = fmt.Errorf("url is incorrect type")
 	}
 	if duration == nil {
 		duration = []float64{0, 100}
-	}
-	// download and mux playlist
-	fail = recu.Mux(playList, tools.FormatedHeader(config.Header, "", 0), num, duration)
-	if fail == 0 {
-		fmt.Printf("Completed: %v:%v\n", playList.Filename, url)
-		return
-	}
-	// if fail, save state to json
-	fmt.Fprintf(os.Stderr, "Download Failed at line: %v\n", fail)
-	switch t := config.Urls[playList.JsonLoc].(type) {
-	case string:
-		config.Urls[playList.JsonLoc] = []any{t, fail}
-	case []any:
-		switch len(t) {
-		case 1:
-			t = append(t, fail)
-			config.Urls[playList.JsonLoc] = t
-		case 2:
-			t[1] = fail
-			config.Urls[playList.JsonLoc] = t
-		case 4:
-			t = append(t, fail)
-			config.Urls[playList.JsonLoc] = t
-		case 5:
-			t[4] = fail
-			config.Urls[playList.JsonLoc] = t
-		}
-	}
-	err := config.Save()
-	if err != nil {
-		fmt.Println(err)
 	}
 	return
 }

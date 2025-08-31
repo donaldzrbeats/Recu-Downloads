@@ -5,7 +5,11 @@ import (
 	"os"
 	"recurbate/playlist"
 	"recurbate/tools"
+	"regexp"
+	"slices"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -32,7 +36,7 @@ func parseDownloadLoop(url string, timeout int, header map[string]string) (data 
 }
 
 // Takes recurbate video URL and returns playlist raw data and returns file name {ts-urls, filename, "done", error}
-func Parse(siteUrl string, header map[string]string, jsonLoc int) (playList playlist.Playlist, errorType string, err error) {
+func Parse(siteUrl string, header map[string]string, jsonLoc, maxRes int) (playList playlist.Playlist, errorType string, err error) {
 	// getting webpage
 	fmt.Printf("\rDownloading HTML: ")
 	htmldata, err := parseDownloadLoop(siteUrl, 10, tools.FormatedHeader(header, "", 1))
@@ -96,7 +100,7 @@ func Parse(siteUrl string, header map[string]string, jsonLoc int) (playList play
 	// determine url prefix for playlist entries
 	prefix := playlistUrl[:strings.LastIndex(playlistUrl, "/")+1]
 	// if playlist contains resolution selection
-	playlistData, err = resolution(playlistData, prefix, header)
+	playlistData, err = resolution(playlistData, prefix, header, maxRes)
 	if err != nil {
 		errorType = "panic"
 		return
@@ -120,10 +124,21 @@ func Parse(siteUrl string, header map[string]string, jsonLoc int) (playList play
 }
 
 // If playlist contains list of resolutions, return the maximum resolution playlist
-func resolution(playlistData []byte, prefix string, header map[string]string) ([]byte, error) {
+func resolution(playlistData []byte, prefix string, header map[string]string, maxRes int) ([]byte, error) {
 	playlistRef := string(playlistData)
 	if strings.Contains(playlistRef, "EXT-X-STREAM-INF") {
-		playlistUrl := maximumResolution(playlistRef, prefix)
+		sortedSet, resolutions := organizeResolutions(playlistRef, prefix)
+		var playlistUrl string
+		for i := len(sortedSet) - 1; i >= 0; i-- {
+			if sortedSet[i] <= maxRes {
+				playlistUrl = resolutions[sortedSet[i]]
+				break
+			}
+		}
+		if playlistUrl == "" {
+			println("The given Max Resolution isn't available, using maximum")
+			playlistUrl = resolutions[6969]
+		}
 		fmt.Printf("\rDownloading Playlist: ")
 		var err error
 		playlistData, err = parseDownloadLoop(playlistUrl, 10, tools.FormatedHeader(header, "", 0))
@@ -134,17 +149,57 @@ func resolution(playlistData []byte, prefix string, header map[string]string) ([
 	}
 	return playlistData, nil
 }
-// TODO, add logic to select a maximum resolution from config file
-func maximumResolution(playlistRef, prefix string) (playlistUrl string) {
+
+// collects all resolution playlists, grouped by frame heights
+func organizeResolutions(playlistRef, prefix string) (sortedSet []int, resolutions map[int]string) {
 	playlistLines := strings.Split(playlistRef, "\n")
+	resolutions = make(map[int]string)
 	for i := 0; i < len(playlistLines)-1; i++ {
-		if strings.Contains(playlistLines[i], "NAME=max") {
-			playlistUrl = playlistLines[i+1]
+		if len(playlistLines[i]) >= 1 && playlistLines[i][0] == '#' {
+			if resolutions[6969] == "" && strings.Contains(playlistLines[i], "NAME=max") {
+				playlistUrl := playlistLines[i+1]
+				if !strings.Contains(playlistUrl, prefix) {
+					playlistUrl = prefix + playlistUrl
+				}
+				resolutions[6969] = playlistUrl
+			}
+			res, err := regexResolutionMatch(playlistLines[i])
+			if err != nil {
+				continue
+			}
+			playlistUrl := playlistLines[i+1]
 			if !strings.Contains(playlistUrl, prefix) {
 				playlistUrl = prefix + playlistUrl
 			}
+			resolutions[res] = playlistUrl
 		}
 	}
+	sortedSet = make([]int, len(resolutions))
+	for i := range resolutions {
+		sortedSet = append(sortedSet, i)
+	}
+	slices.Sort(sortedSet)
+	return
+}
+
+var (
+	regexResolution      *regexp.Regexp
+	regexResolutionMutex sync.Mutex
+)
+
+// returns the frame height of the given playlist string
+func regexResolutionMatch(text string) (int, error) {
+	regexResolutionMutex.Lock()
+	if regexResolution == nil {
+		regexResolution = regexp.MustCompile(`#EXT-X-STREAM-INF:[\w=,]*?RESOLUTION=[\d]+x([\d]+)`)
+	}
+	regexResolutionMutex.Unlock()
+	matches := regexResolution.FindStringSubmatch(text)
+	if len(matches) > 1 {
+		i, err := strconv.Atoi(matches[1])
+		return i, err
+	}
+	return 0, fmt.Errorf("no match found")
 }
 
 // Muxes the transport streams and saves it to a file

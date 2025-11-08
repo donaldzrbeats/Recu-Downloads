@@ -13,6 +13,36 @@ import (
 	"time"
 )
 
+// returns token from given recu html
+func regexTokenMatch(html string, videoid string) (string, error) {
+	term := fmt.Sprintf(`%s"[\n\s]*data-token="([^"]*)"`, videoid)
+	regexToken := regexp.MustCompile(term)
+	matches := regexToken.FindStringSubmatch(html)
+	if len(matches) > 1 {
+		return matches[1], nil
+	}
+	return "", fmt.Errorf("video token not found")
+}
+
+var (
+	regexVideoID      *regexp.Regexp
+	regexVideoIDMutex sync.Mutex
+)
+
+// return video ID from given video url
+func regexVideoIDMatch(text string) (string, error) {
+	regexVideoIDMutex.Lock()
+	if regexVideoID == nil {
+		regexVideoID = regexp.MustCompile(`([\d]*)/play`)
+	}
+	regexVideoIDMutex.Unlock()
+	matches := regexVideoID.FindStringSubmatch(text)
+	if len(matches) > 1 {
+		return matches[1], nil
+	}
+	return "", fmt.Errorf("video id match not found")
+}
+
 func parseDownloadLoop(url string, timeout int, header map[string]string) (data []byte, err error) {
 	retry := 0
 	for {
@@ -46,14 +76,14 @@ func Parse(siteUrl string, header map[string]string, jsonLoc, maxRes int) (playL
 	}
 	html := string(htmldata)
 	fmt.Printf("\r\033[2KDownloading HTML: Complete\n")
-	// determine unique page token
-	token, err := tools.SearchString(html, `data-token="`, `"`)
+	// determine video ID
+	id, err := regexVideoIDMatch(siteUrl)
 	if err != nil {
 		errorType = "panic"
 		return
 	}
-	// determine video token
-	id, err := tools.SearchString(html[strings.Index(html, token):], `data-video-id="`, `"`)
+	// determine unique page token
+	token, err := regexTokenMatch(html, id)
 	if err != nil {
 		errorType = "panic"
 		return

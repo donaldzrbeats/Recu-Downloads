@@ -40,3 +40,5 @@ example:
 }
 ```
 Where you specify the start, end and total length of the video
+git commit -m "jajajaja"
+
